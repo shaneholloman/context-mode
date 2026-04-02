@@ -10,6 +10,7 @@ export default defineConfig({
     // Hook subprocess tests (spawnSync + better-sqlite3 native addon) can
     // fail intermittently under parallel load on CI.  Retry once to absorb
     // transient resource-contention failures without masking real regressions.
-    retry: 2,
+    // Only enable retry on CI to avoid slowing down local dev.
+    retry: process.env.CI ? 2 : 0,
   },
 });

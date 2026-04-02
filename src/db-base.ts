@@ -213,9 +213,9 @@ export function defaultDBPath(prefix: string = "context-mode"): string {
  * Catches errors containing "SQLITE_BUSY" or "database is locked" and
  * retries up to 3 times with delays: 100ms, 500ms, 2000ms.
  * If all retries fail, throws a descriptive error.
+ * Pass custom delays for testing (e.g., [0, 0, 0] to skip waits).
  */
-export function withRetry<T>(fn: () => T): T {
-  const delays = [100, 500, 2000];
+export function withRetry<T>(fn: () => T, delays: number[] = [100, 500, 2000]): T {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {

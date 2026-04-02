@@ -1237,7 +1237,7 @@ describe("SQLITE_BUSY retry logic", () => {
         throw new Error("SQLITE_BUSY: database is locked");
       }
       return "success";
-    });
+    }, [0, 0, 0]);
     expect(result).toBe("success");
     expect(attempts).toBe(3);
   });
@@ -1246,11 +1246,11 @@ describe("SQLITE_BUSY retry logic", () => {
     expect(() => {
       withRetry(() => {
         throw new Error("SQLITE_BUSY: database is locked");
-      });
+      }, [0, 0, 0]);
     }).toThrow(/SQLITE_BUSY.*3 retries/);
   });
 
-  test("standalone withRetry from db-base retries on SQLITE_BUSY", () => {
+  test("withRetry retries on SQLITE_BUSY with zero delays", () => {
     let attempts = 0;
     const result = withRetry(() => {
       attempts++;
@@ -1258,26 +1258,26 @@ describe("SQLITE_BUSY retry logic", () => {
         throw new Error("SQLITE_BUSY: database is locked");
       }
       return "ok";
-    });
+    }, [0, 0, 0]);
     expect(result).toBe("ok");
     expect(attempts).toBe(3);
   });
 
-  test("standalone withRetry throws after max retries exhausted", () => {
+  test("withRetry throws after all retries with zero delays", () => {
     expect(() => {
       withRetry(() => {
         throw new Error("database is locked");
-      });
+      }, [0, 0, 0]);
     }).toThrow(/SQLITE_BUSY.*3 retries/);
   });
 
-  test("standalone withRetry rethrows non-BUSY errors immediately", () => {
+  test("withRetry rethrows non-BUSY errors immediately", () => {
     let attempts = 0;
     expect(() => {
       withRetry(() => {
         attempts++;
         throw new Error("UNIQUE constraint failed");
-      });
+      }, [0, 0, 0]);
     }).toThrow("UNIQUE constraint failed");
     expect(attempts).toBe(1);
   });
