@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { routePreToolUse } from "../../hooks/core/routing.mjs";
-import { ROUTING_BLOCK } from "../../hooks/routing-block.mjs";
+import { createRoutingBlock } from "../../hooks/routing-block.mjs";
+import { createToolNamer } from "../../hooks/core/tool-naming.mjs";
+
+// Subagent routing uses createRoutingBlock(t, { includeCommands: false })
+const _t = createToolNamer("claude-code");
+const SUBAGENT_BLOCK = createRoutingBlock(_t, { includeCommands: false });
 
 describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
   it("Agent tool injects routing block into prompt field", () => {
@@ -11,7 +16,7 @@ describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
       const decision = routePreToolUse("Agent", toolInput, "/test");
 
       expect(decision.action).toBe("modify");
-      expect(decision.updatedInput[field]).toBe("hello" + ROUTING_BLOCK);
+      expect(decision.updatedInput[field]).toBe("hello" + SUBAGENT_BLOCK);
     }
   });
 
@@ -20,7 +25,7 @@ describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
     const decision = routePreToolUse("Agent", toolInput, "/test");
 
     expect(decision.action).toBe("modify");
-    expect(decision.updatedInput.prompt).toBe(ROUTING_BLOCK);
+    expect(decision.updatedInput.prompt).toBe(SUBAGENT_BLOCK);
   });
 
   it("Agent converts subagent_type='Bash' to 'general-purpose'", () => {
@@ -31,7 +36,7 @@ describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
     const decision = routePreToolUse("Agent", toolInput, "/test");
 
     expect(decision.action).toBe("modify");
-    expect(decision.updatedInput.prompt).toBe("do something" + ROUTING_BLOCK);
+    expect(decision.updatedInput.prompt).toBe("do something" + SUBAGENT_BLOCK);
     expect(decision.updatedInput.subagent_type).toBe("general-purpose");
   });
 
@@ -44,9 +49,17 @@ describe("Routing: Subagents (Agent only — Task removed per #241)", () => {
     const decision = routePreToolUse("Agent", toolInput, "/test");
 
     expect(decision.action).toBe("modify");
-    expect(decision.updatedInput.request).toBe("analyze this" + ROUTING_BLOCK);
+    expect(decision.updatedInput.request).toBe("analyze this" + SUBAGENT_BLOCK);
     expect(decision.updatedInput.other_param).toBe(123);
     expect(decision.updatedInput.nested).toEqual({ a: 1 });
+  });
+
+  it("Agent routing block contains label guidance for batch_execute (#256)", () => {
+    const decision = routePreToolUse("Agent", { prompt: "test" }, "/test");
+    const prompt = decision.updatedInput.prompt;
+    expect(prompt).toContain("label");
+    expect(prompt).toContain("descriptive");
+    expect(prompt).toContain("FTS5 chunk title");
   });
 
   it("Task tool is NOT routed — returns null (passthrough) (#241)", () => {

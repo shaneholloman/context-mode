@@ -25,6 +25,8 @@ export function createRoutingBlock(t, options = {}) {
     1. GATHER: ${t("ctx_batch_execute")}(commands, queries)
        - Primary tool for research. Runs all commands, auto-indexes, and searches.
        - ONE call replaces many individual steps.
+       - Each command: {label: "descriptive section header", command: "shell command"}
+       - label becomes the FTS5 chunk title — use descriptive labels for better search.
     2. FOLLOW-UP: ${t("ctx_search")}(queries: ["q1", "q2", ...])
        - Use for all follow-up questions. ONE call, many queries.
     3. PROCESSING: ${t("ctx_execute")}(language, code) | ${t("ctx_execute_file")}(path, language, code)
