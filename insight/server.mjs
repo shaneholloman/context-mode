@@ -783,6 +783,27 @@ function serveStaticFile(pathname) {
   } catch { return null; }
 }
 
+// ── On-demand build: install + build if dist/ is missing ─
+if (!existsSync(join(DIST_DIR, "index.html"))) {
+  const { execSync } = await import("node:child_process");
+  const shellOpts = { cwd: __dirname, stdio: "pipe", shell: true };
+  try {
+    console.error("\n  ┌─ Insight Dashboard ─────────────────────────────┐");
+    console.error("  │  First run — building the dashboard UI.          │");
+    console.error("  │  This only happens once.                         │");
+    console.error("  └─────────────────────────────────────────────────┘\n");
+    console.error("  [1/2] Installing dependencies...");
+    execSync("npm install --no-package-lock --no-save --silent", { ...shellOpts, timeout: 120000 });
+    console.error("  [2/2] Building dashboard...");
+    execSync("npm run build", { ...shellOpts, timeout: 60000 });
+    console.error("  ✓ Ready.\n");
+  } catch (e) {
+    console.error("  ✗ Build failed:", e.message);
+    console.error("  Try manually: cd insight && npm install && npm run build");
+    process.exit(1);
+  }
+}
+
 // ── Server (dual runtime) ────────────────────────────────
 
 const indexHTML = readFileSync(join(DIST_DIR, "index.html"), "utf8");
