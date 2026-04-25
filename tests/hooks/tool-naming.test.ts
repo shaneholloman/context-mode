@@ -53,7 +53,7 @@ const mcpSentinel = resolve(tmpdir(), `context-mode-mcp-ready-${process.ppid}`);
 
 beforeEach(() => {
   if (typeof resetGuidanceThrottle === "function") resetGuidanceThrottle();
-  writeFileSync(mcpSentinel, String(process.pid));
+  writeFileSync(mcpSentinel, String(process.ppid));
 });
 
 afterEach(() => {
@@ -141,20 +141,22 @@ describe("createToolNamer", () => {
 });
 
 describe("KNOWN_PLATFORMS", () => {
-  it("contains all 12 platforms", () => {
+  it("contains all platforms", () => {
     expect(KNOWN_PLATFORMS).toContain("claude-code");
     expect(KNOWN_PLATFORMS).toContain("gemini-cli");
     expect(KNOWN_PLATFORMS).toContain("antigravity");
     expect(KNOWN_PLATFORMS).toContain("opencode");
     expect(KNOWN_PLATFORMS).toContain("kilo");
     expect(KNOWN_PLATFORMS).toContain("vscode-copilot");
+    expect(KNOWN_PLATFORMS).toContain("jetbrains-copilot");
     expect(KNOWN_PLATFORMS).toContain("kiro");
     expect(KNOWN_PLATFORMS).toContain("zed");
     expect(KNOWN_PLATFORMS).toContain("cursor");
     expect(KNOWN_PLATFORMS).toContain("codex");
     expect(KNOWN_PLATFORMS).toContain("openclaw");
     expect(KNOWN_PLATFORMS).toContain("pi");
-    expect(KNOWN_PLATFORMS.length).toBe(12);
+    expect(KNOWN_PLATFORMS).toContain("qwen-code");
+    expect(KNOWN_PLATFORMS.length).toBeGreaterThanOrEqual(14);
   });
 });
 

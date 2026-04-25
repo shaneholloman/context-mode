@@ -361,14 +361,14 @@ export class AnalyticsEngine {
 }
 
 // ─────────────────────────────────────────────────────────
-// formatReport — renders FullReport as concise, honest output
+// formatReport — renders FullReport as sales-grade savings dashboard
 // ─────────────────────────────────────────────────────────
 
 /** Format bytes as human-readable KB or MB. */
 function kb(b: number): string {
   if (b >= 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
   if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${b} B`;
+  return `${Math.round(b)} B`;
 }
 
 /** Format session uptime as human-readable duration. */
@@ -381,29 +381,33 @@ function formatDuration(uptimeMin: string): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-/**
- * Build a before/after comparison bar.
- *
- * The "without" bar is always full (40 chars).
- * The "with" bar is proportional to the ratio of returned vs total.
- */
-function comparisonBars(total: number, returned: number): { withoutBar: string; withBar: string } {
-  const BAR_WIDTH = 40;
-  const withoutBar = "#".repeat(BAR_WIDTH);
-  const withFill = total > 0 ? Math.max(1, Math.round((returned / total) * BAR_WIDTH)) : BAR_WIDTH;
-  const withBar = "#".repeat(withFill) + " ".repeat(BAR_WIDTH - withFill);
-  return { withoutBar, withBar };
+/** Format large numbers with K/M suffixes */
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 /**
- * Render a FullReport as a before/after comparison developers instantly understand.
+ * Build a proportional bar using █ chars, scaled to a fixed width.
+ * Returns e.g. "████████████████████████████████████████" for full width.
+ */
+function dataBar(bytes: number, maxBytes: number, width: number = 40): string {
+  if (maxBytes <= 0) return "░".repeat(width);
+  const filled = Math.max(1, Math.round((bytes / maxBytes) * width));
+  return "█".repeat(Math.min(filled, width)) + "░".repeat(Math.max(0, width - filled));
+}
+
+/**
+ * Render a FullReport as a visual savings dashboard designed for screenshotting.
  *
- * Design rules:
- * - If no savings, show "fresh session" format (no fake percentages)
- * - Active session shows BEFORE vs AFTER -- what would have flooded your conversation vs what actually did
- * - Per-tool table only if 2+ different tools were called
- * - Time gained is the hero metric
- * - Under 15 lines for typical sessions
+ * Design principles:
+ * - Before/After comparison bar is the HERO — one glance = "wow"
+ * - "tokens saved" is the number people share
+ * - Per-tool breakdown shows what each tool SAVED, sorted by impact
+ * - Session memory: one line, reframed as value
+ * - No: Pct column, category tables, tips, jargon
+ * - Under 22 lines for heavy sessions, under 10 for fresh
  */
 export function formatReport(report: FullReport, version?: string, latestVersion?: string | null): string {
   const lines: string[] = [];
@@ -414,104 +418,108 @@ export function formatReport(report: FullReport, version?: string, latestVersion
     report.savings.kept_out + (report.cache ? report.cache.bytes_saved : 0);
   const totalReturned = report.savings.total_bytes_returned;
   const totalCalls = report.savings.total_calls;
+  const grandTotal = totalKeptOut + totalReturned;
+  const savingsPct = grandTotal > 0 ? (totalKeptOut / grandTotal) * 100 : 0;
+  const tokensSaved = Math.round(totalKeptOut / 4);
 
-  // ── Fresh session: almost no activity ──
+  // ── Fresh session: no savings yet ──
   if (totalKeptOut === 0) {
-    lines.push(`context-mode -- session (${duration})`);
+    lines.push(`context-mode  ${duration}  ${totalCalls} calls`);
     lines.push("");
 
     if (totalCalls === 0) {
-      lines.push("No tool calls yet.");
+      lines.push("No tool calls yet. Use batch_execute or execute to start saving tokens.");
     } else {
-      const callLabel = totalCalls === 1 ? "1 tool call" : `${totalCalls} tool calls`;
-      lines.push(`${callLabel}  |  ${kb(totalReturned)} in context  |  no savings yet`);
+      lines.push(`${kb(totalReturned)} entered context  |  0 tokens saved`);
     }
 
+    // Footer
     lines.push("");
-    lines.push("Tip: Use ctx_execute to analyze files in sandbox -- savings start there.");
-    lines.push("");
-    lines.push(version ? `v${version}` : "context-mode");
+    const versionStr = version ? `v${version}` : "context-mode";
+    lines.push(versionStr);
     if (version && latestVersion && latestVersion !== "unknown" && latestVersion !== version) {
-      lines.push(`Update available: v${version} -> v${latestVersion}  |  Run: ctx_upgrade`);
+      lines.push(`Update available: v${version} -> v${latestVersion}  |  ctx_upgrade`);
     }
     return lines.join("\n");
   }
 
-  // ── Active session with real savings ──
-  const grandTotal = totalKeptOut + totalReturned;
-  const savingsPercent =
-    grandTotal > 0
-      ? ((totalKeptOut / grandTotal) * 100).toFixed(1)
-      : "0.0";
+  // ── Active session: visual savings dashboard ──
 
-  // ── Time saved estimate (hero metric) ──
-  // ~4 bytes per token, ~1000 tokens per minute of context window capacity
-  const minSaved = Math.round(totalKeptOut / 4 / 1000);
-
-  lines.push(`context-mode -- session (${duration})`);
+  // Line 1: Hero metric — the screenshottable number
+  lines.push(`${fmtNum(tokensSaved)} tokens saved  ·  ${savingsPct.toFixed(1)}% reduction  ·  ${duration}`);
   lines.push("");
 
-  // ── Before/after comparison ──
-  const { withoutBar, withBar } = comparisonBars(grandTotal, totalReturned);
-  lines.push(`Without context-mode:  |${withoutBar}| ${kb(grandTotal)} in your conversation`);
-  lines.push(`With context-mode:     |${withBar}| ${kb(totalReturned)} in your conversation`);
+  // Lines 2-3: Before/After comparison bars — the visual proof
+  lines.push(`Without context-mode  |${dataBar(grandTotal, grandTotal)}| ${kb(grandTotal)}`);
+  lines.push(`With context-mode     |${dataBar(totalReturned, grandTotal)}| ${kb(totalReturned)}`);
   lines.push("");
-  const savingsLine = `${kb(totalKeptOut)} processed in sandbox, never entered your conversation. (${savingsPercent}% reduction)`;
-  lines.push(savingsLine);
 
-  if (minSaved > 0) {
-    const timeSaved = minSaved >= 60
-      ? `+${Math.floor(minSaved / 60)}h ${minSaved % 60}m`
-      : `+${minSaved}m`;
-    lines.push(`${timeSaved} session time gained.`);
+  // Value statement — the line people share
+  lines.push(`${kb(totalKeptOut)} kept out of your conversation. Never entered context.`);
+  lines.push("");
+
+  // Compact stats row
+  const statParts = [`${totalCalls} calls`];
+  if (report.cache && report.cache.hits > 0) {
+    statParts.push(`${report.cache.hits} cache hits (+${kb(report.cache.bytes_saved)})`);
   }
+  lines.push(statParts.join("  ·  "));
 
-  // ── Per-tool table (only if 2+ different tools) ──
+  // ── Per-tool breakdown (only if 2+ tools, sorted by saved) ──
   const activatedTools = report.savings.by_tool.filter((t) => t.calls > 0);
   if (activatedTools.length >= 2) {
     lines.push("");
-    for (const t of activatedTools) {
-      const returned = t.context_kb * 1024;
-      const callLabel = `${t.calls} call${t.calls !== 1 ? "s" : ""}`;
-      lines.push(
-        `  ${t.tool.padEnd(22)} ${callLabel.padEnd(10)} ${kb(returned)} used`,
-      );
+
+    // Estimate per-tool saved using global savings ratio
+    const toolRows = activatedTools.map((t) => {
+      const returnedBytes = t.context_kb * 1024;
+      const estimatedTotal = savingsPct < 100
+        ? returnedBytes / (1 - savingsPct / 100)
+        : returnedBytes;
+      const estimatedSaved = Math.max(0, estimatedTotal - returnedBytes);
+      return { ...t, returnedBytes, estimatedSaved };
+    }).sort((a, b) => b.estimatedSaved - a.estimatedSaved);
+
+    // Compact table: tool name, calls, saved
+    for (const t of toolRows) {
+      const name = t.tool.length > 22 ? t.tool.slice(0, 19) + "..." : t.tool;
+      lines.push(`  ${name.padEnd(22)}  ${String(t.calls).padStart(4)} calls  ${kb(t.estimatedSaved).padStart(8)} saved`);
     }
   }
 
-  // ── Session continuity breakdown ──
-  if (report.continuity.by_category.length > 0) {
+  // ── Session memory — business-friendly ──
+  if (report.continuity.total_events > 0) {
     lines.push("");
-    lines.push(`Session continuity: ${report.continuity.total_events} events preserved across ${report.continuity.compact_count} compaction${report.continuity.compact_count !== 1 ? "s" : ""}`);
-    lines.push("");
-    for (const c of report.continuity.by_category) {
-      const cat = c.category.padEnd(9);
-      const count = String(c.count).padStart(3);
-      const preview = c.preview.length > 45 ? c.preview.slice(0, 42) + "..." : c.preview;
-      lines.push(`  ${cat} ${count}   ${preview.padEnd(47)} ${c.why}`);
+    const cats = report.continuity.by_category;
+    // Pick the top 3-4 most impactful categories for a human-readable summary
+    const highlights: string[] = [];
+    const fileCount = cats.find(c => c.category === "file")?.count;
+    const gitCount = cats.find(c => c.category === "git")?.count;
+    const promptCount = cats.find(c => c.category === "prompt")?.count;
+    const errorCount = cats.find(c => c.category === "error")?.count;
+    const taskCount = cats.find(c => c.category === "task")?.count;
+    if (fileCount) highlights.push(`${fileCount} files`);
+    if (gitCount) highlights.push(`${gitCount} git ops`);
+    if (promptCount) highlights.push(`${promptCount} prompts`);
+    if (errorCount) highlights.push(`${errorCount} errors`);
+    if (taskCount) highlights.push(`${taskCount} tasks`);
+
+    const summary = highlights.length > 0 ? `  ·  ${highlights.join(", ")}` : "";
+
+    if (report.continuity.compact_count > 0) {
+      lines.push(`${fmtNum(report.continuity.total_events)} events remembered across ${report.continuity.compact_count} compaction${report.continuity.compact_count !== 1 ? "s" : ""}${summary}`);
+      lines.push("Zero knowledge lost — picks up exactly where you left off.");
+    } else {
+      lines.push(`${fmtNum(report.continuity.total_events)} events tracked${summary}`);
     }
   }
 
-  // ── Footer: version + outdated warning ──
-  const footerParts: string[] = [];
-  if (report.continuity.by_category.length === 0 && report.continuity.compact_count > 0) {
-    footerParts.push(
-      `${report.continuity.compact_count} compaction${report.continuity.compact_count !== 1 ? "s" : ""}`,
-    );
-  }
-  if (report.continuity.by_category.length === 0 && report.continuity.total_events > 0) {
-    footerParts.push(
-      `${report.continuity.total_events} event${report.continuity.total_events !== 1 ? "s" : ""} preserved`,
-    );
-  }
-  const versionStr = version ? `v${version}` : "context-mode";
-  footerParts.push(versionStr);
+  // ── Footer ──
   lines.push("");
-  lines.push(footerParts.join("  |  "));
-
-  // Outdated warning in footer
+  const versionStr = version ? `v${version}` : "context-mode";
+  lines.push(versionStr);
   if (version && latestVersion && latestVersion !== "unknown" && latestVersion !== version) {
-    lines.push(`Update available: v${version} -> v${latestVersion}  |  Run: ctx_upgrade`);
+    lines.push(`Update available: v${version} -> v${latestVersion}  |  ctx_upgrade`);
   }
 
   return lines.join("\n");

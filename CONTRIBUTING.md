@@ -35,6 +35,7 @@ src/
     types.ts       → HookAdapter interface, RoutingInstructionsConfig
     detect.ts      → Platform detection via env vars
     claude-code/   → Claude Code adapter (index.ts, hooks.ts, config.ts)
+    qwen-code/     → Qwen Code adapter (extends Claude Code wire protocol)
     gemini-cli/    → Gemini CLI adapter
     opencode/      → OpenCode adapter
     codex/         → Codex CLI adapter
@@ -287,6 +288,7 @@ npx skills add mksglu/context-mode --skill context-mode-ops
 | Cursor hooks | `tests/hooks/cursor-hooks.test.ts` |
 | Gemini hooks | `tests/hooks/gemini-hooks.test.ts` |
 | VS Code hooks | `tests/hooks/vscode-hooks.test.ts` |
+| JetBrains hooks | `tests/hooks/jetbrains-hooks.test.ts` |
 | Kiro hooks | `tests/hooks/kiro-hooks.test.ts` |
 | Session DB | `tests/session/session-db.test.ts` |
 | Session extract | `tests/session/session-extract.test.ts` |

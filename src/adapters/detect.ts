@@ -15,6 +15,7 @@
  *   - Codex CLI:      CODEX_CI, CODEX_THREAD_ID | ~/.codex/
  *   - Cursor:         CURSOR_TRACE_ID (MCP), CURSOR_CLI (terminal) | ~/.cursor/
  *   - VS Code Copilot: VSCODE_PID, VSCODE_CWD | ~/.vscode/
+ *   - JetBrains Copilot: IDEA_INITIAL_DIRECTORY, IDEA_HOME, JETBRAINS_CLIENT_ID | ~/.config/JetBrains/
  */
 
 import { existsSync } from "node:fs";
@@ -23,6 +24,24 @@ import { homedir } from "node:os";
 
 import type { PlatformId, DetectionSignal, HookAdapter } from "./types.js";
 import { CLIENT_NAME_TO_PLATFORM } from "./client-map.js";
+
+/**
+ * High-confidence env vars per platform, checked in priority order.
+ * Single source of truth — consumed by detectPlatform() below and by
+ * tests that need to clear platform-related env vars deterministically.
+ */
+export const PLATFORM_ENV_VARS = [
+  ["claude-code", ["CLAUDE_PROJECT_DIR", "CLAUDE_SESSION_ID"]],
+  ["gemini-cli", ["GEMINI_PROJECT_DIR", "GEMINI_CLI"]],
+  ["openclaw", ["OPENCLAW_HOME", "OPENCLAW_CLI"]],
+  ["kilo", ["KILO", "KILO_PID"]],
+  ["opencode", ["OPENCODE", "OPENCODE_PID"]],
+  ["codex", ["CODEX_CI", "CODEX_THREAD_ID"]],
+  ["cursor", ["CURSOR_TRACE_ID", "CURSOR_CLI"]],
+  ["vscode-copilot", ["VSCODE_PID", "VSCODE_CWD"]],
+  ["jetbrains-copilot", ["IDEA_INITIAL_DIRECTORY", "IDEA_HOME", "JETBRAINS_CLIENT_ID"]],
+  ["qwen-code", ["QWEN_PROJECT_DIR", "QWEN_SESSION_ID"]],
+] as const satisfies ReadonlyArray<readonly [PlatformId, readonly string[]]>;
 
 /**
  * Detect the current platform by checking env vars and config dirs.
@@ -41,6 +60,14 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
         reason: `MCP clientInfo.name="${clientInfo.name}"`,
       };
     }
+    // Qwen Code uses dynamic client names: qwen-cli-mcp-client-<serverName>
+    if (clientInfo.name.startsWith("qwen-cli-mcp-client")) {
+      return {
+        platform: "qwen-code",
+        confidence: "high",
+        reason: `MCP clientInfo.name="${clientInfo.name}" (qwen-cli pattern)`,
+      };
+    }
   }
 
   // ── Explicit platform override ────────────────────────
@@ -48,7 +75,7 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
   if (platformOverride) {
     const validPlatforms: PlatformId[] = [
       "claude-code", "gemini-cli", "kilo", "opencode", "codex",
-      "vscode-copilot", "cursor", "antigravity", "kiro", "pi", "zed",
+      "vscode-copilot", "jetbrains-copilot", "cursor", "antigravity", "kiro", "pi", "zed", "qwen-code",
     ];
     if (validPlatforms.includes(platformOverride as PlatformId)) {
       return {
@@ -61,68 +88,14 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
 
   // ── High confidence: environment variables ─────────────
 
-  if (process.env.CLAUDE_PROJECT_DIR || process.env.CLAUDE_SESSION_ID) {
-    return {
-      platform: "claude-code",
-      confidence: "high",
-      reason: "CLAUDE_PROJECT_DIR or CLAUDE_SESSION_ID env var set",
-    };
-  }
-
-  if (process.env.GEMINI_PROJECT_DIR || process.env.GEMINI_CLI) {
-    return {
-      platform: "gemini-cli",
-      confidence: "high",
-      reason: "GEMINI_PROJECT_DIR or GEMINI_CLI env var set",
-    };
-  }
-
-  if (process.env.OPENCLAW_HOME || process.env.OPENCLAW_CLI) {
-    return {
-      platform: "openclaw",
-      confidence: "high",
-      reason: "OPENCLAW_HOME or OPENCLAW_CLI env var set",
-    };
-  }
-
-  if (process.env.KILO || process.env.KILO_PID) {
-    return {
-      platform: "kilo",
-      confidence: "high",
-      reason: "KILO or KILO_PID env var set",
-    };
-  }
-
-  if (process.env.OPENCODE || process.env.OPENCODE_PID) {
-    return {
-      platform: "opencode",
-      confidence: "high",
-      reason: "OPENCODE or OPENCODE_PID env var set",
-    };
-  }
-
-  if (process.env.CODEX_CI || process.env.CODEX_THREAD_ID) {
-    return {
-      platform: "codex",
-      confidence: "high",
-      reason: "CODEX_CI or CODEX_THREAD_ID env var set",
-    };
-  }
-
-  if (process.env.CURSOR_TRACE_ID || process.env.CURSOR_CLI) {
-    return {
-      platform: "cursor",
-      confidence: "high",
-      reason: "CURSOR_TRACE_ID or CURSOR_CLI env var set",
-    };
-  }
-
-  if (process.env.VSCODE_PID || process.env.VSCODE_CWD) {
-    return {
-      platform: "vscode-copilot",
-      confidence: "high",
-      reason: "VSCODE_PID or VSCODE_CWD env var set",
-    };
+  for (const [platform, vars] of PLATFORM_ENV_VARS) {
+    if (vars.some((v) => process.env[v])) {
+      return {
+        platform,
+        confidence: "high",
+        reason: `${vars.join(" or ")} env var set`,
+      };
+    }
   }
 
   // ── Medium confidence: config directory existence ──────
@@ -177,6 +150,14 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
     };
   }
 
+  if (existsSync(resolve(home, ".qwen"))) {
+    return {
+      platform: "qwen-code",
+      confidence: "medium",
+      reason: "~/.qwen/ directory exists",
+    };
+  }
+
   if (existsSync(resolve(home, ".openclaw"))) {
     return {
       platform: "openclaw",
@@ -190,6 +171,14 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
       platform: "kilo",
       confidence: "medium",
       reason: "~/.config/kilo/ directory exists",
+    };
+  }
+
+  if (existsSync(resolve(home, ".config", "JetBrains"))) {
+    return {
+      platform: "jetbrains-copilot",
+      confidence: "medium",
+      reason: "~/.config/JetBrains/ directory exists",
     };
   }
 
@@ -257,6 +246,11 @@ export async function getAdapter(platform?: PlatformId): Promise<HookAdapter> {
       return new VSCodeCopilotAdapter();
     }
 
+    case "jetbrains-copilot": {
+      const { JetBrainsCopilotAdapter } = await import("./jetbrains-copilot/index.js");
+      return new JetBrainsCopilotAdapter();
+    }
+
     case "cursor": {
       const { CursorAdapter } = await import("./cursor/index.js");
       return new CursorAdapter();
@@ -275,6 +269,11 @@ export async function getAdapter(platform?: PlatformId): Promise<HookAdapter> {
     case "zed": {
       const { ZedAdapter } = await import("./zed/index.js");
       return new ZedAdapter();
+    }
+
+    case "qwen-code": {
+      const { QwenCodeAdapter } = await import("./qwen-code/index.js");
+      return new QwenCodeAdapter();
     }
 
     default: {
