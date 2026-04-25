@@ -368,7 +368,7 @@ export class AnalyticsEngine {
 function kb(b: number): string {
   if (b >= 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
   if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${b} B`;
+  return `${Math.round(b)} B`;
 }
 
 /** Format session uptime as human-readable duration. */
@@ -381,12 +381,6 @@ function formatDuration(uptimeMin: string): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-/** Build a savings efficiency bar using unicode block chars. */
-function savingsBar(pct: number, width: number = 20): string {
-  const filled = Math.round((pct / 100) * width);
-  return "\u2588".repeat(filled) + "\u2591".repeat(width - filled);
-}
-
 /** Format large numbers with K/M suffixes */
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -395,15 +389,25 @@ function fmtNum(n: number): string {
 }
 
 /**
- * Render a FullReport as a savings-first dashboard that creates instant value recognition.
+ * Build a proportional bar using █ chars, scaled to a fixed width.
+ * Returns e.g. "████████████████████████████████████████" for full width.
+ */
+function dataBar(bytes: number, maxBytes: number, width: number = 40): string {
+  if (maxBytes <= 0) return "░".repeat(width);
+  const filled = Math.max(1, Math.round((bytes / maxBytes) * width));
+  return "█".repeat(Math.min(filled, width)) + "░".repeat(Math.max(0, width - filled));
+}
+
+/**
+ * Render a FullReport as a visual savings dashboard designed for screenshotting.
  *
- * Design philosophy:
- * - Hero metric is "tokens saved" -- the number the user cares about
- * - Every line must make the user think "this tool is saving me money/time"
- * - Fresh session: honest, no fake numbers, clear call-to-action
- * - Active session: savings bar + per-tool breakdown sorted by impact
- * - Session memory reframed as value prop ("survives compaction")
- * - Under 25 lines for heavy sessions, under 10 for fresh
+ * Design principles:
+ * - Before/After comparison bar is the HERO — one glance = "wow"
+ * - "tokens saved" is the number people share
+ * - Per-tool breakdown shows what each tool SAVED, sorted by impact
+ * - Session memory: one line, reframed as value
+ * - No: Pct column, category tables, tips, jargon
+ * - Under 22 lines for heavy sessions, under 10 for fresh
  */
 export function formatReport(report: FullReport, version?: string, latestVersion?: string | null): string {
   const lines: string[] = [];
@@ -420,18 +424,14 @@ export function formatReport(report: FullReport, version?: string, latestVersion
 
   // ── Fresh session: no savings yet ──
   if (totalKeptOut === 0) {
-    lines.push(`Context Mode -- Session (${duration})`);
+    lines.push(`context-mode  ${duration}  ${totalCalls} calls`);
     lines.push("");
 
     if (totalCalls === 0) {
-      lines.push("No tool calls yet.");
+      lines.push("No tool calls yet. Use batch_execute or execute to start saving tokens.");
     } else {
-      const callLabel = totalCalls === 1 ? "1 call" : `${totalCalls} calls`;
-      lines.push(`${callLabel}  |  ${kb(totalReturned)} in context  |  0 tokens saved`);
+      lines.push(`${kb(totalReturned)} entered context  |  0 tokens saved`);
     }
-
-    lines.push("");
-    lines.push("Tip: Use ctx_execute or ctx_batch_execute to keep data out of context.");
 
     // Footer
     lines.push("");
@@ -443,27 +443,34 @@ export function formatReport(report: FullReport, version?: string, latestVersion
     return lines.join("\n");
   }
 
-  // ── Active session: savings dashboard ──
-  lines.push(`Context Mode -- Token Savings (${duration})`);
+  // ── Active session: visual savings dashboard ──
+
+  // Line 1: Hero metric — the screenshottable number
+  lines.push(`${fmtNum(tokensSaved)} tokens saved  ·  ${savingsPct.toFixed(1)}% reduction  ·  ${duration}`);
   lines.push("");
 
-  // Hero metrics block
-  lines.push(`Total calls:       ${totalCalls}`);
-  lines.push(`Data processed:    ${kb(grandTotal)}`);
-  lines.push(`In context:        ${kb(totalReturned)}`);
-  lines.push(`Tokens saved:      ${fmtNum(tokensSaved)} (${savingsPct.toFixed(1)}%)`);
+  // Lines 2-3: Before/After comparison bars — the visual proof
+  lines.push(`Without context-mode  |${dataBar(grandTotal, grandTotal)}| ${kb(grandTotal)}`);
+  lines.push(`With context-mode     |${dataBar(totalReturned, grandTotal)}| ${kb(totalReturned)}`);
+  lines.push("");
+
+  // Value statement — the line people share
+  lines.push(`${kb(totalKeptOut)} kept out of your conversation. Never entered context.`);
+  lines.push("");
+
+  // Compact stats row
+  const statParts = [`${totalCalls} calls`];
   if (report.cache && report.cache.hits > 0) {
-    lines.push(`Cache hits:        ${report.cache.hits} (+${kb(report.cache.bytes_saved)} saved)`);
+    statParts.push(`${report.cache.hits} cache hits (+${kb(report.cache.bytes_saved)})`);
   }
-  lines.push("");
-  lines.push(`Saved:  ${savingsBar(savingsPct)} ${savingsPct.toFixed(1)}%`);
+  lines.push(statParts.join("  ·  "));
 
-  // ── Per-tool breakdown (only if 2+ tools) ──
+  // ── Per-tool breakdown (only if 2+ tools, sorted by saved) ──
   const activatedTools = report.savings.by_tool.filter((t) => t.calls > 0);
   if (activatedTools.length >= 2) {
     lines.push("");
 
-    // Estimate per-tool saved using global ratio
+    // Estimate per-tool saved using global savings ratio
     const toolRows = activatedTools.map((t) => {
       const returnedBytes = t.context_kb * 1024;
       const estimatedTotal = savingsPct < 100
@@ -473,29 +480,37 @@ export function formatReport(report: FullReport, version?: string, latestVersion
       return { ...t, returnedBytes, estimatedSaved };
     }).sort((a, b) => b.estimatedSaved - a.estimatedSaved);
 
-    lines.push(`${"#".padEnd(3)} ${"Tool".padEnd(24)} ${"Calls".padStart(5)}   ${"Saved".padStart(8)}`);
-    for (let i = 0; i < toolRows.length; i++) {
-      const t = toolRows[i];
-      const idx = `${i + 1}.`.padEnd(3);
-      const name = t.tool.length > 24 ? t.tool.slice(0, 21) + "..." : t.tool.padEnd(24);
-      const count = String(t.calls).padStart(5);
-      const saved = kb(t.estimatedSaved).padStart(8);
-      lines.push(`${idx} ${name} ${count}   ${saved}`);
+    // Compact table: tool name, calls, saved
+    for (const t of toolRows) {
+      const name = t.tool.length > 22 ? t.tool.slice(0, 19) + "..." : t.tool;
+      lines.push(`  ${name.padEnd(22)}  ${String(t.calls).padStart(4)} calls  ${kb(t.estimatedSaved).padStart(8)} saved`);
     }
   }
 
-  // ── Session memory (reframed as value prop) ──
+  // ── Session memory — business-friendly ──
   if (report.continuity.total_events > 0) {
     lines.push("");
     const cats = report.continuity.by_category;
-    if (cats.length > 0) {
-      const catParts = cats.map((c) => `${c.category} ${c.count}`);
-      lines.push(`Session memory: ${fmtNum(report.continuity.total_events)} events  [${catParts.join("  ")}]`);
-    } else {
-      lines.push(`Session memory: ${fmtNum(report.continuity.total_events)} events tracked`);
-    }
+    // Pick the top 3-4 most impactful categories for a human-readable summary
+    const highlights: string[] = [];
+    const fileCount = cats.find(c => c.category === "file")?.count;
+    const gitCount = cats.find(c => c.category === "git")?.count;
+    const promptCount = cats.find(c => c.category === "prompt")?.count;
+    const errorCount = cats.find(c => c.category === "error")?.count;
+    const taskCount = cats.find(c => c.category === "task")?.count;
+    if (fileCount) highlights.push(`${fileCount} files`);
+    if (gitCount) highlights.push(`${gitCount} git ops`);
+    if (promptCount) highlights.push(`${promptCount} prompts`);
+    if (errorCount) highlights.push(`${errorCount} errors`);
+    if (taskCount) highlights.push(`${taskCount} tasks`);
+
+    const summary = highlights.length > 0 ? `  ·  ${highlights.join(", ")}` : "";
+
     if (report.continuity.compact_count > 0) {
-      lines.push(`Survived ${report.continuity.compact_count} compaction${report.continuity.compact_count !== 1 ? "s" : ""} -- context resets, knowledge persists.`);
+      lines.push(`${fmtNum(report.continuity.total_events)} events remembered across ${report.continuity.compact_count} compaction${report.continuity.compact_count !== 1 ? "s" : ""}${summary}`);
+      lines.push("Zero knowledge lost — picks up exactly where you left off.");
+    } else {
+      lines.push(`${fmtNum(report.continuity.total_events)} events tracked${summary}`);
     }
   }
 
