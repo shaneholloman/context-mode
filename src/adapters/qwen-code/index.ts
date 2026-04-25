@@ -203,14 +203,14 @@ export class QwenCodeAdapter implements HookAdapter {
   }
 
   generateHookConfig(pluginRoot: string): HookRegistration {
-    // Qwen Code supports both its own tool names and Claude-compatible names.
-    // Include both sets so routing works regardless of which name the model uses.
+    // Qwen Code passes native tool names in hook stdin (verified from
+    // packages/core/src/tools/tool-names.ts). Claude-style names (Bash, Read)
+    // are only accepted in permission configs, NOT in hook tool_name payloads.
     const preToolUseMatcher = [
-      // Claude-compatible names
-      "Bash", "Read", "Grep", "WebFetch", "Agent",
-      // Qwen-native names (see TOOL_ALIASES in routing.mjs)
-      "run_shell_command", "read_file", "grep_search", "web_fetch", "agent",
-      // MCP tools
+      // Qwen-native names (canonical tool_name in hook stdin)
+      "run_shell_command", "read_file", "read_many_files", "grep_search",
+      "web_fetch", "agent",
+      // MCP tools (same naming convention as Claude Code)
       "mcp__plugin_context-mode_context-mode__ctx_execute",
       "mcp__plugin_context-mode_context-mode__ctx_execute_file",
       "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
