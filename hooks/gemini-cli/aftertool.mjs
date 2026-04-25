@@ -11,7 +11,7 @@ import "../ensure-deps.mjs";
  */
 
 import { readStdin, getSessionId, getSessionDBPath, getInputProjectDir, GEMINI_OPTS } from "../session-helpers.mjs";
-import { createSessionLoaders } from "../session-loaders.mjs";
+import { createSessionLoaders, attributeAndInsertEvents } from "../session-loaders.mjs";
 import { appendFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -48,20 +48,7 @@ try {
     tool_output: input.tool_output,
   });
 
-  const sessionStats = db.getSessionStats(sessionId);
-  const lastKnownProjectDir = typeof db.getLatestAttributedProjectDir === "function"
-    ? db.getLatestAttributedProjectDir(sessionId)
-    : null;
-  const attributions = resolveProjectAttributions(events, {
-    sessionOriginDir: sessionStats?.project_dir || projectDir,
-    inputProjectDir: projectDir,
-    workspaceRoots: Array.isArray(input.workspace_roots) ? input.workspace_roots : [],
-    lastKnownProjectDir,
-  });
-
-  for (let i = 0; i < events.length; i++) {
-    db.insertEvent(sessionId, events[i], "AfterTool", attributions[i]);
-  }
+  attributeAndInsertEvents(db, sessionId, events, input, projectDir, "AfterTool", resolveProjectAttributions);
 
   appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] OK: ${input.tool_name} → ${events.length} events\n`);
   db.close();

@@ -8,7 +8,7 @@ import "../ensure-deps.mjs";
 import { readStdin, getSessionId, getSessionDBPath, getInputProjectDir, CURSOR_OPTS } from "../session-helpers.mjs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSessionLoaders } from "../session-loaders.mjs";
+import { createSessionLoaders, attributeAndInsertEvents } from "../session-loaders.mjs";
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 const { loadSessionDB, loadExtract, loadProjectAttribution } = createSessionLoaders(HOOK_DIR);
@@ -60,20 +60,7 @@ try {
 
   const events = extractEvents(normalizedInput);
 
-  const sessionStats = db.getSessionStats(sessionId);
-  const lastKnownProjectDir = typeof db.getLatestAttributedProjectDir === "function"
-    ? db.getLatestAttributedProjectDir(sessionId)
-    : null;
-  const attributions = resolveProjectAttributions(events, {
-    sessionOriginDir: sessionStats?.project_dir || projectDir,
-    inputProjectDir: projectDir,
-    workspaceRoots: Array.isArray(input.workspace_roots) ? input.workspace_roots : [],
-    lastKnownProjectDir,
-  });
-
-  for (let i = 0; i < events.length; i++) {
-    db.insertEvent(sessionId, events[i], "PostToolUse", attributions[i]);
-  }
+  attributeAndInsertEvents(db, sessionId, events, input, projectDir, "PostToolUse", resolveProjectAttributions);
 
   db.close();
 } catch {

@@ -11,7 +11,7 @@ import "./ensure-deps.mjs";
  */
 
 import { readStdin, getSessionId, getSessionDBPath, getInputProjectDir } from "./session-helpers.mjs";
-import { createSessionLoaders } from "./session-loaders.mjs";
+import { createSessionLoaders, attributeAndInsertEvents } from "./session-loaders.mjs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,10 +41,6 @@ try {
     const sessionId = getSessionId(input);
 
     db.ensureSession(sessionId, projectDir);
-    const sessionStats = db.getSessionStats(sessionId);
-    const lastKnownProjectDir = typeof db.getLatestAttributedProjectDir === "function"
-      ? db.getLatestAttributedProjectDir(sessionId)
-      : null;
 
     // 1. Always save the raw prompt
     const promptEvent = {
@@ -53,21 +49,23 @@ try {
       data: prompt,
       priority: 1,
     };
-    const promptAttribution = resolveProjectAttributions([promptEvent], {
-      sessionOriginDir: sessionStats?.project_dir || projectDir,
-      inputProjectDir: projectDir,
-      workspaceRoots: Array.isArray(input.workspace_roots) ? input.workspace_roots : [],
-      lastKnownProjectDir,
-    })[0];
-    db.insertEvent(sessionId, promptEvent, "UserPromptSubmit", promptAttribution);
+    const promptAttributions = attributeAndInsertEvents(
+      db, sessionId, [promptEvent], input, projectDir, "UserPromptSubmit", resolveProjectAttributions,
+    );
 
     // 2. Extract decision/role/intent/data from user message
     const userEvents = extractUserEvents(trimmed);
+    // Feed lastKnownProjectDir from the first attribution into the second batch
+    const savedLastKnown = promptAttributions[0]?.projectDir || null;
+    const sessionStats = db.getSessionStats(sessionId);
+    const lastKnownProjectDir = typeof db.getLatestAttributedProjectDir === "function"
+      ? db.getLatestAttributedProjectDir(sessionId)
+      : null;
     const userAttributions = resolveProjectAttributions(userEvents, {
       sessionOriginDir: sessionStats?.project_dir || projectDir,
       inputProjectDir: projectDir,
       workspaceRoots: Array.isArray(input.workspace_roots) ? input.workspace_roots : [],
-      lastKnownProjectDir: promptAttribution?.projectDir || lastKnownProjectDir,
+      lastKnownProjectDir: savedLastKnown || lastKnownProjectDir,
     });
     for (let i = 0; i < userEvents.length; i++) {
       db.insertEvent(sessionId, userEvents[i], "UserPromptSubmit", userAttributions[i]);

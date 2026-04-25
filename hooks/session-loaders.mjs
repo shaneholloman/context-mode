@@ -55,3 +55,27 @@ export function createSessionLoaders(hookDir) {
     },
   };
 }
+
+/**
+ * Shared helper — resolves project attributions and inserts events into the DB.
+ * Eliminates the ~15-line attribution block duplicated across all hook files.
+ *
+ * @returns {Array} The resolved attributions array (useful when a subsequent
+ *   attribution block needs `lastKnownProjectDir` from the first).
+ */
+export function attributeAndInsertEvents(db, sessionId, events, input, projectDir, hookName, resolveProjectAttributions) {
+  const sessionStats = db.getSessionStats(sessionId);
+  const lastKnownProjectDir = typeof db.getLatestAttributedProjectDir === "function"
+    ? db.getLatestAttributedProjectDir(sessionId)
+    : null;
+  const attributions = resolveProjectAttributions(events, {
+    sessionOriginDir: sessionStats?.project_dir || projectDir,
+    inputProjectDir: projectDir,
+    workspaceRoots: Array.isArray(input.workspace_roots) ? input.workspace_roots : [],
+    lastKnownProjectDir,
+  });
+  for (let i = 0; i < events.length; i++) {
+    db.insertEvent(sessionId, events[i], hookName, attributions[i]);
+  }
+  return attributions;
+}
