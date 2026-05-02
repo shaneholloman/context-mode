@@ -75,29 +75,37 @@ describe("Adapter memory conventions", () => {
     });
   });
 
+  // OpenCode/KiloCode honor XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
+  // setup-home anchors both env vars under fakeHome, so the expected root
+  // depends on platform.
+  const xdgRoot =
+    process.platform === "win32"
+      ? join(homedir(), "AppData", "Roaming")
+      : join(homedir(), ".config");
+
   describe("OpenCodeAdapter (default platform=opencode)", () => {
     const a = new OpenCodeAdapter();
-    it("getConfigDir is ~/.config/opencode", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".config", "opencode"));
+    it("getConfigDir is <xdg>/opencode", () => {
+      expect(a.getConfigDir()).toBe(join(xdgRoot, "opencode"));
     });
     it("getInstructionFiles is ['AGENTS.md']", () => {
       expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
     });
-    it("getMemoryDir is ~/.config/opencode/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".config", "opencode", "memory"));
+    it("getMemoryDir is <xdg>/opencode/memory", () => {
+      expect(a.getMemoryDir()).toBe(join(xdgRoot, "opencode", "memory"));
     });
   });
 
   describe("OpenCodeAdapter (kilo variant)", () => {
     const a = new OpenCodeAdapter("kilo");
-    it("getConfigDir is ~/.config/kilo", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".config", "kilo"));
+    it("getConfigDir is <xdg>/kilo", () => {
+      expect(a.getConfigDir()).toBe(join(xdgRoot, "kilo"));
     });
     it("getInstructionFiles is ['AGENTS.md']", () => {
       expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
     });
-    it("getMemoryDir is ~/.config/kilo/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".config", "kilo", "memory"));
+    it("getMemoryDir is <xdg>/kilo/memory", () => {
+      expect(a.getMemoryDir()).toBe(join(xdgRoot, "kilo", "memory"));
     });
   });
 
