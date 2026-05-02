@@ -1360,19 +1360,25 @@ server.registerTool(
       let totalSize = 0;
       const sections: string[] = [];
 
-      // Open SessionDB once before the loop (Blocker 4: avoid open/close per query)
+      // Open SessionDB once before the loop (Blocker 4: avoid open/close per query).
+      // The DB filename must match what session-snapshot/session-extract write to,
+      // which is `${hash}${getWorktreeSuffix()}.db` — bug #4 was the missing suffix.
       let timelineDB: InstanceType<typeof SessionDB> | null = null;
       if (sort === "timeline") {
         try {
           const sessionsDir = getSessionDir();
-          const dbFile = join(sessionsDir, `${hashProjectDir()}.db`);
+          const dbFile = join(sessionsDir, `${hashProjectDir()}${getWorktreeSuffix()}.db`);
           if (existsSync(dbFile)) {
             timelineDB = new SessionDB({ dbPath: dbFile });
           }
         } catch { /* SessionDB unavailable — search ContentStore + auto-memory only */ }
       }
 
-      const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+      // Adapter-aware config dir. Falls back to CLAUDE_CONFIG_DIR / ~/.claude
+      // only when no platform adapter has been detected (e.g. raw `npx context-mode dev`).
+      const configDir = _detectedAdapter?.getConfigDir()
+        || process.env.CLAUDE_CONFIG_DIR
+        || join(homedir(), ".claude");
 
       try {
       for (const q of queryList) {
@@ -1393,6 +1399,7 @@ server.registerTool(
             sessionDB: timelineDB,
             projectDir: getProjectDir(),
             configDir,
+            adapter: _detectedAdapter ?? undefined,
           });
         } else {
           results = store.searchWithFallback(q, effectiveLimit, source, contentType);

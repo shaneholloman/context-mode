@@ -207,6 +207,16 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     return resolve(homedir(), ".codex", "config.toml");
   }
 
+  getInstructionFiles(): string[] {
+    // Codex CLI honors AGENTS.md plus an optional override file.
+    return ["AGENTS.md", "AGENTS.override.md"];
+  }
+
+  getMemoryDir(): string {
+    // Codex uses "memories" (plural), not the default "memory".
+    return resolve(homedir(), ".codex", "memories");
+  }
+
   generateHookConfig(pluginRoot: string): HookRegistration {
     return {
       PreToolUse: [
