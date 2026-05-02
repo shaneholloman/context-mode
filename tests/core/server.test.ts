@@ -906,6 +906,88 @@ describe("ctx_index: projectRoot path resolution (#365)", () => {
       try { proc.kill("SIGTERM"); } catch { /* best effort */ }
     }
   }, 30_000);
+
+  // ── JetBrains regression: IDEA_INITIAL_DIRECTORY must enter the cascade ──
+  //
+  // JetBrains adapter sets only IDEA_INITIAL_DIRECTORY (no CLAUDE_PROJECT_DIR,
+  // no CONTEXT_MODE_PROJECT_DIR). Before the fix, getProjectDir() ignored that
+  // var and fell through to process.cwd(), which is the IDE bin dir on
+  // JetBrains — making `ctx_index({ path: "rel/foo.md" })` resolve to a path
+  // under the IDE installation and ENOENT.
+  //
+  // Spawn the compiled server directly (build/server.js) instead of start.mjs
+  // so we never enter the start.mjs path that auto-populates CLAUDE_PROJECT_DIR
+  // and CONTEXT_MODE_PROJECT_DIR from cwd. This lets us isolate the cascade
+  // and prove that IDEA_INITIAL_DIRECTORY alone is enough to resolve relative
+  // paths under the JetBrains project root.
+  test("relative path resolves against IDEA_INITIAL_DIRECTORY (JetBrains)", async () => {
+    const buildEntry = resolve(__dirname, "..", "..", "build", "server.js");
+    if (!existsSync(buildEntry)) {
+      // Compile src → build/ on demand. Bundle is untouched (CI rebuilds it).
+      execSync("npx tsc --silent", {
+        cwd: resolve(__dirname, "..", ".."),
+        stdio: "pipe",
+        timeout: 60_000,
+      });
+    }
+
+    // Simulate JetBrains: cwd is an IDE-bin-like dir (NOT the project),
+    // env carries only IDEA_INITIAL_DIRECTORY pointing at the real project.
+    const fakeIdeBin = mkdtempSync(join(tmpdir(), "ctx-jetbrains-bin-"));
+
+    // Strip every PROJECT_DIR env var from the inherited env so the cascade
+    // is forced to consult IDEA_INITIAL_DIRECTORY.
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDE_PROJECT_DIR;
+    delete cleanEnv.GEMINI_PROJECT_DIR;
+    delete cleanEnv.VSCODE_CWD;
+    delete cleanEnv.OPENCODE_PROJECT_DIR;
+    delete cleanEnv.PI_PROJECT_DIR;
+    delete cleanEnv.CONTEXT_MODE_PROJECT_DIR;
+
+    const proc = spawn("node", [buildEntry], {
+      stdio: ["pipe", "pipe", "pipe"],
+      cwd: fakeIdeBin,
+      env: {
+        ...cleanEnv,
+        CONTEXT_MODE_DISABLE_VERSION_CHECK: "1",
+        IDEA_INITIAL_DIRECTORY: ctxProjectDir,
+      },
+    });
+
+    try {
+      await awaitRpc(proc, 1, {
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "ctx-index-jetbrains", version: "1.0" } },
+      });
+      sendRpc(proc, { jsonrpc: "2.0", method: "notifications/initialized" });
+
+      const indexResp = await awaitRpc(proc, 100, {
+        jsonrpc: "2.0", id: 100, method: "tools/call",
+        params: { name: "ctx_index", arguments: { path: ctxFileName } },
+      });
+
+      expect(indexResp?.error).toBeUndefined();
+      const indexText = indexResp?.result?.content?.[0]?.text ?? "";
+      // Must succeed — proves the relative path resolved under
+      // IDEA_INITIAL_DIRECTORY (not the fake IDE-bin cwd).
+      expect(indexText).toMatch(/Indexed \d+ section/);
+      expect(indexText).not.toMatch(/Index error/);
+
+      // Round-trip via search using the unique marker only present in the
+      // file under IDEA_INITIAL_DIRECTORY — proves the right file was read.
+      const searchResp = await awaitRpc(proc, 101, {
+        jsonrpc: "2.0", id: 101, method: "tools/call",
+        params: { name: "ctx_search", arguments: { queries: [uniqueMarker] } },
+      });
+      expect(searchResp?.error).toBeUndefined();
+      const searchText = searchResp?.result?.content?.[0]?.text ?? "";
+      expect(searchText).toContain(uniqueMarker);
+    } finally {
+      try { proc.kill("SIGTERM"); } catch { /* best effort */ }
+      try { rmSync(fakeIdeBin, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }, 60_000);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -168,6 +168,7 @@ function getProjectDir(): string {
     || process.env.VSCODE_CWD
     || process.env.OPENCODE_PROJECT_DIR
     || process.env.PI_PROJECT_DIR
+    || process.env.IDEA_INITIAL_DIRECTORY
     || process.env.CONTEXT_MODE_PROJECT_DIR
     || process.cwd();
 }
