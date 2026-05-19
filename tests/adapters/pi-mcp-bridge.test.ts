@@ -569,3 +569,110 @@ describe("MCPStdioClient — request() respawns for any method after idle exit (
     client.shutdown();
   }, 15_000);
 });
+
+// ── Slice 8 — callTool MUST NOT impose its own timeout (#643) ──
+//
+// Reported in #643: the bridge enforced a hardcoded 120s ceiling on
+// every `tools/call`, so long-running `ctx_execute` (test suites, builds,
+// large `cargo test`) failed at the bridge layer with
+//   "MCP request timeout after 120000ms: tools/call"
+// even though the executor child would have finished.
+//
+// Mert's directive (no env var, no hardcode bump): REMOVE the timeout
+// for `tools/call` entirely. Preserve the 60s bound on
+// initialize/tools-list (bootstrap hang detection — legit timeout case).
+// The trade-off (a deliberately hung MCP child during tools/call hangs
+// the call indefinitely) is accepted: it belongs to the executor /
+// child layer, not to the bridge. Background mode and Pi-level cancel
+// remain the user-facing escape hatches.
+//
+// These tests pin the contract behaviorally via fake timers — advancing
+// >120s while a `tools/call` is in flight MUST NOT reject it. The
+// initialize path still rejects at 60s by default (regression guard).
+describe("MCPStdioClient — callTool has no bridge-imposed timeout (#643)", () => {
+  it("callTool does not reject when bridge clock advances past the old 120s ceiling", async () => {
+    const { MCPStdioClient } = await import("../../src/adapters/pi/mcp-bridge.js");
+    const client = new MCPStdioClient("/unused/server.mjs");
+    const stdin = {
+      destroyed: false,
+      writableEnded: false,
+      closed: false,
+      write: (_data: string, cb?: (err?: Error) => void) => {
+        cb?.();
+        return true;
+      },
+    };
+    (client as unknown as { child: unknown }).child = { stdin };
+
+    vi.useFakeTimers();
+    try {
+      const inFlight = client.callTool("ping", {});
+      // Suppress unhandledrejection while we observe pending state.
+      const settled: { value: "resolved" | "rejected" | null } = { value: null };
+      void inFlight.then(
+        () => {
+          settled.value = "resolved";
+        },
+        () => {
+          settled.value = "rejected";
+        },
+      );
+
+      // Advance well past the old DEFAULT_CALL_TIMEOUT_MS = 120_000ms
+      // ceiling. Before the fix this rejects with "MCP request timeout
+      // after 120000ms". After the fix the bridge installs no timer for
+      // tools/call, so the promise stays pending.
+      vi.advanceTimersByTime(300_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled.value).toBe(null);
+
+      // Now feed the response — proves the call still resolves cleanly
+      // when the server eventually replies, no matter how late.
+      const id = (client as unknown as { requestId: number }).requestId;
+      const response = JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        result: { content: [{ type: "text", text: "late-but-fine" }] },
+      });
+      (client as unknown as {
+        onData: (b: Buffer) => void;
+      }).onData(Buffer.from(response + "\n", "utf-8"));
+
+      const r = await inFlight;
+      expect(r.content?.[0]?.text).toBe("late-but-fine");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("initialize still rejects at the 60s default timeout (regression guard)", async () => {
+    const { MCPStdioClient } = await import("../../src/adapters/pi/mcp-bridge.js");
+    const client = new MCPStdioClient("/unused/server.mjs");
+    const stdin = {
+      destroyed: false,
+      writableEnded: false,
+      closed: false,
+      write: (_data: string, cb?: (err?: Error) => void) => {
+        cb?.();
+        return true;
+      },
+    };
+    (client as unknown as { child: unknown }).child = { stdin };
+
+    vi.useFakeTimers();
+    try {
+      const inFlight = client.initialize();
+      const rejection = inFlight.catch((err) => err);
+
+      // Default request timeout for initialize is 60_000ms; advancing
+      // past it MUST cause the request to reject. This pins the bound
+      // that #643 explicitly preserves.
+      vi.advanceTimersByTime(60_001);
+      const err = await rejection;
+      expect(String(err)).toMatch(/MCP request timeout after 60000ms: initialize/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

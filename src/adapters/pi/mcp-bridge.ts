@@ -122,10 +122,16 @@ export interface MCPCallResult {
   isError?: boolean;
 }
 
+// Bridge-imposed timeout for protocol-handshake methods (initialize,
+// tools/list). These MUST be bounded: a server that never replies to
+// initialize would otherwise block Pi's bridge bootstrap indefinitely.
+// `tools/call` deliberately has NO bridge ceiling (#643) — long-running
+// ctx_execute (test suites, builds, cargo test) was rejected by a 120s
+// hardcoded bound even though the executor child would have finished.
+// Responsibility for bounding a tool call belongs to the executor
+// layer (per-tool timeout / background mode / Pi-level cancel), not
+// to the transport.
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
-// Tools/call may run shell commands or fetch URLs — wider window than
-// initialize/list, but still bounded so a hung server can't block Pi.
-const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 
 class PiTextComponent {
   private text: string;
@@ -402,18 +408,26 @@ export class MCPStdioClient {
     if (!this.child) throw new Error("MCP client not started");
     const id = ++this.requestId;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (!this.pending.has(id)) return;
-        this.pending.delete(id);
-        reject(new Error(`MCP request timeout after ${timeoutMs}ms: ${method}`));
-      }, timeoutMs);
+      // Gate the timer on a finite ms value so callers can pass
+      // `Number.POSITIVE_INFINITY` to mean "no bridge ceiling" (#643).
+      // Node coerces both `undefined` and `Infinity` to a 1ms delay
+      // (TimeoutOverflowWarning), so we can't just pass them through —
+      // we must skip the setTimeout entirely. tools/call uses this path
+      // because long-running ctx_execute must not be bounded here.
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            if (!this.pending.has(id)) return;
+            this.pending.delete(id);
+            reject(new Error(`MCP request timeout after ${timeoutMs}ms: ${method}`));
+          }, timeoutMs)
+        : null;
       this.pending.set(id, {
         resolve: (v) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           resolve(v as T);
         },
         reject: (e) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           reject(e);
         },
       });
@@ -501,10 +515,18 @@ export class MCPStdioClient {
     // one layer covers `listTools` / `initialize` paths too, with a
     // single-flight guard against orphan child processes from
     // concurrent callers.
+    //
+    // No bridge-imposed timeout for tools/call (#643). The previous
+    // 120s ceiling rejected legitimate long-running ctx_execute calls
+    // (test suites, builds, large `cargo test`) even though the
+    // executor child would have finished. Bounding belongs to the
+    // executor layer (per-tool timeout / background mode / Pi cancel),
+    // not the transport. `Number.POSITIVE_INFINITY` instructs
+    // `request()` to skip the setTimeout entirely — see the gate there.
     return this.request<MCPCallResult>(
       "tools/call",
       { name, arguments: args ?? {} },
-      DEFAULT_CALL_TIMEOUT_MS,
+      Number.POSITIVE_INFINITY,
     );
   }
 
