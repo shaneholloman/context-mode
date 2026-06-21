@@ -80,8 +80,11 @@ function isPowerShell(shellPath: string | null | undefined): boolean {
 }
 
 export function buildPowerShellScriptContent(code: string): string {
+  // Prefix a UTF-8 BOM so Windows PowerShell 5.1 reliably detects the script
+  // file as UTF-8 (without it, 5.1 falls back to the ANSI code page and
+  // mangles non-ASCII characters in the script body).
   return [
-    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()",
+    "\uFEFF[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()",
     "$OutputEncoding = [System.Text.UTF8Encoding]::new()",
     code,
